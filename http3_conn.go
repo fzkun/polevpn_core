@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/polevpn/h3conn"
+	"e.coding.net/fzkun/zlkj/h3conn"
 )
 
 const (
