@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/binary"
 	"errors"
 	"net/http"
 	"strconv"
@@ -63,6 +64,7 @@ type PoleVpnClient struct {
 	allocip           string
 	remoteip          string
 	lasttimeHeartbeat time.Time
+	serverEchoTs      uint64 // timestamp echoed back to server for RTT measurement
 	reconnecting      bool
 	wg                *sync.WaitGroup
 	device            *TunDevice
@@ -291,6 +293,12 @@ func (pc *PoleVpnClient) handlerAllocAdressRespose(pkt PolePacket, conn Conn) {
 func (pc *PoleVpnClient) handlerHeartBeatRespose(pkt PolePacket, conn Conn) {
 	plog.Debug("received heartbeat")
 	pc.lasttimeHeartbeat = time.Now()
+	// store server timestamp to echo back in the next heartbeat for RTT measurement
+	if len(pkt) >= POLE_PACKET_HEADER_LEN+8 {
+		pc.mutex.Lock()
+		pc.serverEchoTs = binary.BigEndian.Uint64(pkt[POLE_PACKET_HEADER_LEN:])
+		pc.mutex.Unlock()
+	}
 }
 
 func (pc *PoleVpnClient) handlerIPDataResponse(pkt PolePacket, conn Conn) {
@@ -379,9 +387,14 @@ func (pc *PoleVpnClient) reconnect() {
 }
 
 func (pc *PoleVpnClient) SendHeartBeat() {
-	buf := make([]byte, POLE_PACKET_HEADER_LEN)
+	buf := make([]byte, POLE_PACKET_HEADER_LEN+8)
 	PolePacket(buf).SetCmd(CMD_HEART_BEAT)
-	PolePacket(buf).SetLen(POLE_PACKET_HEADER_LEN)
+	PolePacket(buf).SetLen(uint16(len(buf)))
+	// echo back the server's timestamp so it can measure RTT
+	pc.mutex.Lock()
+	ts := pc.serverEchoTs
+	pc.mutex.Unlock()
+	binary.BigEndian.PutUint64(buf[POLE_PACKET_HEADER_LEN:], ts)
 	pc.conn.Send(buf)
 }
 
